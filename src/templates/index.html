@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div class="summary-grid">
+    <div><div class="num">{{ summary.school_count }}</div>校（対象小学校）</div>
+    <div><div class="num">{{ "%.0f"|format(summary.total_route_length_m / 1000) }}km</div>通学路総延長</div>
+    <div><div class="num">{{ summary.total_accidents }}件</div>市内の交通事故（2024年）</div>
+    <div><div class="num">{{ summary.near_route_accidents }}件</div>通学路から{{ near_threshold_m|int }}m以内で発生</div>
+    <div><div class="num">{{ summary.ped_accidents }}件</div>歩行者・自転車が関与</div>
+    <div><div class="num">{{ summary.fatal_accidents }}件</div>死亡事故</div>
+  </div>
+</div>
+
+<div class="card">
+  <div id="map"></div>
+  <div class="legend">
+    <span><span class="swatch" style="background:#c0392b;"></span>危険度スコア 上位20%の通学路</span>
+    <span><span class="swatch" style="background:#e2a63b;"></span>上位50%</span>
+    <span><span class="swatch" style="background:#7f9c96;"></span>それ以外</span>
+    <span><span class="dot" style="background:#c0392b;"></span>死亡事故</span>
+    <span><span class="dot" style="background:#2b6cb0;"></span>歩行者・自転車が関与</span>
+    <span><span class="dot" style="background:#999;"></span>その他の事故</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">学校別 危険度ランキング（通学路1kmあたりのスコア）</h2>
+  <p class="note">
+    スコア = 死亡事故×10 + 歩行者・自転車関与事故×3 + その他の事故×1（通学路から{{ near_threshold_m|int }}m以内で発生したもののみを集計）。
+    通学路の総延長で割ることで、路線が長い学校ほど不利にならないよう補正している。
+  </p>
+  <div class="table-wrap">
+  <table>
+    <tr><th>学校</th><th>通学路延長(m)</th><th>近接事故数</th><th>うち歩行者等</th><th>うち死亡</th><th>スコア</th><th>1kmあたり密度</th></tr>
+    {% for s in schools %}
+    <tr class="{% if s.rank == 'high' %}rank-high{% elif s.rank == 'mid' %}rank-mid{% endif %}">
+      <td>{{ s.name }}</td>
+      <td>{{ "%.0f"|format(s.length_m) }}</td>
+      <td>{{ s.near_acc }}</td>
+      <td>{{ s.ped_acc }}</td>
+      <td>{{ s.fatal_acc }}</td>
+      <td>{{ s.score }}</td>
+      <td>{{ "%.2f"|format(s.density) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const routeFeatures = {{ route_features | tojson }};
+  const accidentPoints = {{ accident_points | tojson }};
+
+  const rankColor = { high: '#c0392b', mid: '#e2a63b', low: '#7f9c96' };
+  const rankWeight = { high: 4, mid: 3, low: 1.5 };
+
+  const map = L.map('map').setView([35.735, 139.925], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 18,
+  }).addTo(map);
+
+  routeFeatures.forEach(function (r) {
+    L.polyline(r.points, {
+      color: rankColor[r.rank],
+      weight: rankWeight[r.rank],
+      opacity: 0.8,
+    }).addTo(map).bindTooltip(r.school + (r.category ? '（' + r.category + '）' : ''));
+  });
+
+  accidentPoints.forEach(function (a) {
+    let color = '#999', radius = 3;
+    if (a.is_fatal) { color = '#c0392b'; radius = 6; }
+    else if (a.is_ped) { color = '#2b6cb0'; radius = 4; }
+    L.circleMarker([a.lat, a.lng], {
+      radius: radius, color: color, fillColor: color, fillOpacity: 0.75, weight: 1,
+    }).addTo(map);
+  });
+</script>
+{% endblock %}
